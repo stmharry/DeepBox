@@ -13,7 +13,9 @@ TRAIN = 0
 VAL = 1
 TEST = 2
 
+
 class Dataset(object):
+
     @staticmethod
     def split(X, ind):
         return [np.split(x, ind) for x in X]
@@ -23,14 +25,14 @@ class Dataset(object):
         _X = np.concatenate(X)
         m = np.nanmean(_X, 0)
         s = np.nanstd(_X, 0) + _EPSILON
-        
+
         return [(x - m) / s for x in X]
 
     @staticmethod
     def one_hot(Y):
         _Y = np.concatenate(Y)
         y0 = np.unique(_Y[~np.isnan(_Y)])
-      
+
         _Y = []
         for y in Y:
             _y = (y[:, None] == y0).astype(float)
@@ -44,10 +46,7 @@ class Dataset(object):
         return max([v.shape[0] for v in feed_dict.values() if isinstance(v, np.ndarray)]) if feed_dict else 0
 
     @staticmethod
-    def get_batch(feed_dict, batch_size):
-        sample_num = Dataset.get_sample_num(feed_dict)
-        total_batch_num = int(np.ceil(sample_num / batch_size))
-
+    def get_batch(feed_dict, sample_num, batch_size, total_batch_num):
         for batch_num in range(total_batch_num):
             batch = {}
             min_batch_index = batch_num * batch_size
@@ -64,20 +63,25 @@ class Dataset(object):
     def permute(feed_dict):
         perm = np.random.permutation(Dataset.get_sample_num(feed_dict))
         return dict([(key, value[perm]) if isinstance(value, np.ndarray) else (key, value) for (key, value) in feed_dict.iteritems()])
-        
+
+
 class Model(object):
+
     @staticmethod
-    def print_report(phase, epoch_num, total_epoch_num, progress, keys, values, end_token):
-        phase_str = {TRAIN:'[TRAINING]', VAL:'[VALIDATION]', TEST:'[TESTING]'}
+    def print_report(phase, epoch_num, total_epoch_num, progress, keys, values):
+        phase_str = ['train', 'val', 'test']
+        epoch_length = np.floor(np.log10(total_epoch_num)).astype(int) + 1
         progress_length = int(progress / 100 * _BAR_LENGTH)
         neg_progress_length = _BAR_LENGTH - progress_length
 
-        print('%-12s Epoch: %2d/%2d  Progress: [%s%s]  ' %(phase_str[phase], epoch_num, total_epoch_num, '=' * progress_length, '-' * neg_progress_length), end='')
-        if (len(keys) != 0) and (len(values) != 0):
-            print('Value: ', end='')
-            for (k, v) in zip(keys, values):
-                print('%s = %.4f  ' %(k, v), end='')
-        print('\033[K', end=end_token)
+        if phase != VAL:
+            print('\rEpoch: %*d/%*d [%s%s]  ' % (
+                epoch_length, epoch_num, epoch_length, total_epoch_num, '=' * progress_length, '-' * neg_progress_length), end='')
+        if (phase != VAL) or ((phase == VAL) and (epoch_num == total_epoch_num)):
+            if (len(keys) != 0) and (len(values) != 0):
+                for (k, v) in zip(keys, values):
+                    print('%s: %.4f  ' % (phase_str[phase] + '-' + k, v), end='')
+        print('\033[K', end='')
         sys.stdout.flush()
 
     @staticmethod
@@ -87,7 +91,7 @@ class Model(object):
     @staticmethod
     def get_batch_shape(x):
         return tuple([int(s) if s is not None else None for s in x.get_shape().as_list()[1:]])
-    
+
     @staticmethod
     def get_size(x):
         return np.prod(Model.get_batch_shape(x))
@@ -103,7 +107,7 @@ class Model(object):
 
     @staticmethod
     def bias(shape):
-        #return tf.Variable(tf.constant(0.1, shape=shape))
+        # return tf.Variable(tf.constant(0.1, shape=shape))
         return tf.Variable(tf.truncated_normal(shape, stddev=0.1))
 
     @staticmethod
@@ -126,7 +130,7 @@ class Model(object):
     @staticmethod
     def flatten(x):
         return tf.reshape(x, (-1, Model.get_size(x)))
-    
+
     @staticmethod
     def max_pool(x, shape, strides=(), padding='VALID'):
         input_shape = Model.get_batch_shape(x)
@@ -157,14 +161,15 @@ class Model(object):
 
         self.val_flag = False
         self.args = [{
-            'inputs': {}, 
+            'inputs': {},
             'outputs': {},
             'updates': {},
-            'kwargs': {'epoch':_EPOCH, 'batch_size':_BATCH_SIZE}} for _ in xrange(3)]
+            'kwargs': {'epoch': _EPOCH, 'batch_size': _BATCH_SIZE}} for _ in xrange(3)]
         self.output_values = [[] for _ in xrange(3)]
 
-    def init(self):
-        self.sess.run(tf.initialize_all_variables())
+    def init(self, excludes=[]):
+        self.sess.run(tf.initialize_variables(
+            [v for v in tf.all_variables() if v not in excludes]))
 
     def set(self, phase, inputs=None, outputs=None, updates=None, **kwargs):
         if phase == VAL:
@@ -188,48 +193,56 @@ class Model(object):
 
     def feed(self, phase):
         args = self.args[phase]
-        (inputs, outputs, updates, kwargs) = (args['inputs'], args['outputs'], args['updates'], args['kwargs'])
+        (inputs, outputs, updates, kwargs) = (
+            args['inputs'], args['outputs'], args['updates'], args['kwargs'])
         (total_epoch_num, batch_size) = (kwargs['epoch'], kwargs['batch_size'])
 
         sample_num = Dataset.get_sample_num(inputs)
         batch_size = sample_num if batch_size == -1 else batch_size
-        total_batch_num = int(np.ceil(sample_num / batch_size))
+        total_batch_num = int(np.ceil(float(sample_num) / batch_size))
         self.output_values[phase] = []
-            
+
         key_shape = [Model.get_shape(key) for key in outputs.keys()]
-        key_form = [bool(shape) and ((shape[0] is None) or (shape[0] == batch_size)) for shape in key_shape]
-        key_show = [not form and value is not None for (form, value) in zip(key_form, outputs.values())]
+        key_form = [bool(shape) and ((shape[0] is None) or (
+            shape[0] == batch_size)) for shape in key_shape]
+        key_show = [not form and value is not None for (
+            form, value) in zip(key_form, outputs.values())]
 
         for epoch_num in xrange(total_epoch_num):
             if phase == TRAIN:
                 inputs = Dataset.permute(inputs)
 
             value_epoch = dict([
-                (key, np.zeros((sample_num,) + shape[1:]) if form else np.zeros((total_batch_num,) + shape))
+                (key, np.zeros((sample_num,) +
+                               shape[1:]) if form else np.zeros((total_batch_num,) + shape))
                 for (key, shape, form) in zip(outputs.keys(), key_shape, key_form)])
 
-            for (batch, batch_num, min_batch_index, max_batch_index) in Dataset.get_batch(inputs, batch_size):
-                value_batch = self.sess.run(outputs.keys() + updates.keys(), feed_dict=batch)[:len(outputs)]
-               
+            for (batch, batch_num, min_batch_index, max_batch_index) in Dataset.get_batch(inputs, sample_num, batch_size, total_batch_num):
+                value_batch = self.sess.run(
+                    outputs.keys() + updates.keys(), feed_dict=batch)[:len(outputs)]
+
                 for (key, value, form) in zip(outputs.keys(), value_batch, key_form):
                     if form:
-                        value_epoch[key][min_batch_index:max_batch_index] = value
+                        value_epoch[key][
+                            min_batch_index:max_batch_index] = value
                     else:
                         value_epoch[key][batch_num] = value
 
                 Model.print_report(
                     phase,
-                    epoch_num + 1, 
-                    total_epoch_num, 
-                    (batch_num + 1.) / total_batch_num * 100, 
-                    [value for (show, value) in zip(key_show, outputs.values()) if show],
-                    [np.sum(value) / (batch_num + 1) for (show, value) in zip(key_show, value_epoch.values()) if show],
-                    '\r')
+                    epoch_num + 1,
+                    total_epoch_num,
+                    (batch_num + 1.) / total_batch_num * 100,
+                    [value for (show, value) in zip(
+                        key_show, outputs.values()) if show],
+                    [np.sum(value) / (batch_num + 1) for (show, value)
+                     in zip(key_show, value_epoch.values()) if show])
 
             self.output_values[phase] += [value_epoch]
-            print('')
             if (phase == TRAIN) and self.val_flag:
                 self.feed(VAL)
+            if phase != VAL:
+                print('')
 
     def save(self, path, step=None):
         if step is None:
@@ -240,4 +253,4 @@ class Model(object):
     def load(self, path):
         state = tf.train.get_checkpoint_state(path)
         if state and state.model_checkpoint_path:
-            self.saver.restore(sess, state.model_checkpoint_path)
+            self.saver.restore(self.sess, state.model_checkpoint_path)
