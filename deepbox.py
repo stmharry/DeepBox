@@ -127,7 +127,7 @@ class Model(object):
     @staticmethod
     def dense_sequential(x, d, arch):
         h = x
-        for (i, output_dim) in zip(len(arch), arch):
+        for output_dim in arch:
             h = Model.dense_relu_drop(h, d, output_dim)
         return h
 

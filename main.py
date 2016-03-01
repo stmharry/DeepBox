@@ -1,83 +1,53 @@
-import tensorflow as tf
-import deepbox as db
 import numpy as np
-import os
+import tensorflow as tf
+import scipy.io
 
-from scipy.io import loadmat
-from keras.datasets import mnist
+import deepbox as db
 
-def get_path(issave):
-    isload = not issave
-    root = 'temp/'
-    i = 0
-    while True:
-        path = root + str(i) + '/model'
-        if os.path.isfile(path):
-            i += 1
-            if isload:
-                yield path
-        else:
-            directory = root + str(i)
-            if issave and not os.path.isdir(directory):
-                os.mkdir(directory)
-            break
-    yield path
+_DATA_DIR = './data/'
+_SEL = 3
 
-def get_save_path():
-    return [p for p in get_path(True)][0]
+_FEAT = 'surf'
+_DOMAIN = 'webcam'
+_ARCH = [1024]  # 1000-1024-10
+_LEARN_RATE = 1e-3
+_KWARGS = {'epoch': 16, 'batch_size': -1, 'report_per': 1}
 
-def get_load_path():
-    for p in get_path(False):
-        yield p
 
-if 'dataset' not in locals():
-    ((X_train, y_train), (X_test, y_test)) = mnist.load_data()
+def normalize(X):
+    _X = np.concatenate(X)
+    m = np.max(_X, 0) + 1e-7
+    return [x / m for x in X]
 
-    X_train = X_train[0:1000]
-    y_train = y_train[0:1000]
-    X_test = X_test[0:1000]
-    y_test = y_test[0:1000]
 
-    dev_ratio = 0.8
-    len_dev = int(dev_ratio * X_train.shape[0])
-    
-    (X_dev, X_val) = np.split(X_train, [len_dev])
-    (y_dev, y_val) = np.split(y_train, [len_dev])
+def get(feat, domain):
+    np.random.seed(1337)
 
-    (X_dev, X_val, X_test) = db.Dataset.normalize([X_dev, X_val, X_test])
-    ((y_dev, y_val, y_test), y0) = db.Dataset.one_hot([y_dev, y_val, y_test])
+    mat = scipy.io.loadmat(_DATA_DIR + feat + '_' + domain + '.mat')
+    (X, Y) = (mat['X'], mat['Y'][:, 0])
+    X = db.Dataset.normalize([X])[0]
+    Y = db.Dataset.one_hot([Y])[0][0]
+    (N, DX) = X.shape
+    (N, DY) = Y.shape
+    (U, L) = [x.T.flatten() for x in np.split(np.argsort(Y * np.random.random_sample((N, 1)), 0), [-_SEL])]
+    return (X, Y, N, DX, DY, U, L)
 
-if 'model' not in locals():
-    x = tf.placeholder('float', shape=[None, 28, 28])
-    y = tf.placeholder('float', shape=[None, 10])
-    d = tf.placeholder('float')
 
-    h = tf.reshape(x, (-1, 28, 28, 1)) 
-    h = db.Model.conv2d(h, 32, (5, 5), (1, 1), 'SAME')
-    h = tf.nn.relu6(h)
-    h = db.Model.max_pool(h, (2, 2), (2, 2), 'SAME')
+(X, Y, N, DX, DY, U, L) = get(_FEAT, _DOMAIN)
 
-    h = db.Model.conv2d(h, 64, (5, 5), (1, 1), 'SAME')
-    h = tf.nn.relu6(h)
-    h = db.Model.max_pool(h, (2, 2), (2, 2), 'SAME')
+x = tf.placeholder('float', (None, DX))
+y = tf.placeholder('float', (None, DY))
+h = db.Model.dense_sequential(x, 1.0, _ARCH)
+yp = tf.nn.softmax(db.Model.dense(h, DY))
 
-    h = tf.reshape(h, [-1, db.Model.get_size(h)])
-    h = db.Model.dense(h, 1024)
-    h = tf.nn.relu6(h)
-    h = tf.nn.dropout(h, d)
-    h = db.Model.dense(h, 10)
-    yp = tf.nn.softmax(h)
+loss = - tf.reduce_mean(tf.reduce_sum(y * tf.log(yp), 1), 0)
+train = tf.train.AdamOptimizer(_LEARN_RATE).minimize(loss)
 
-    loss = -tf.reduce_mean(y * tf.log(yp))
-    correct = tf.equal(tf.argmax(yp, 1), tf.argmax(y, 1))
-    acc = tf.reduce_mean(tf.cast(correct, 'float'))
-
-    train = tf.train.AdamOptimizer(1e-4).minimize(loss)
+correct = tf.equal(tf.argmax(y, 1), tf.argmax(yp, 1))
+acc = tf.reduce_mean(tf.to_float(correct))
 
 model = db.Model()
 model.init()
-
-model.set(db.TRAIN, {x:X_dev, y:y_dev, d:0.5}, {loss:'loss', acc:'acc'}, {train:None}, epoch=1, batch_size=128)
-model.set(db.VAL, {x:X_val, y:y_val, d:0.5}, {loss:'loss', acc:'acc'})
-model.set(db.TEST, {x:X_test, y:y_test, d:1.0}, {yp:None})
-
+model.set_train({x: X[L], y: Y[L]}, {loss: 'loss', acc: 'acc'}, {train: None}, **_KWARGS)
+model.set_val({x: X[U], y: Y[U]}, {loss: 'loss', acc: 'acc'})
+model.train()
