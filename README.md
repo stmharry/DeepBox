@@ -7,7 +7,6 @@ A useful toolbox on top of TensorFlow.
 - Python ≥ 2.7.10
 - TensorFlow ≥ 0.6.1
 - NumPy ≥ 1.10.4
-- SciPy ≥ 0.16.1
 
 ## Features
 ### Light-weighted wrapper for TensorFlow
