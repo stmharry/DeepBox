@@ -7,6 +7,7 @@ import numpy as np
 _EPSILON = 1e-7
 _EPOCH = 1
 _BATCH_SIZE = 256
+_REPORT_PER = 1
 _BAR_LENGTH = 20
 
 TRAIN = 0
@@ -71,16 +72,17 @@ class Model(object):
     def print_report(phase, epoch_num, total_epoch_num, progress, keys, values):
         phase_str = ['train', 'val', 'test']
         epoch_length = np.floor(np.log10(total_epoch_num)).astype(int) + 1
-        progress_length = int(progress / 100 * _BAR_LENGTH)
+        progress_length = int(progress * _BAR_LENGTH)
         neg_progress_length = _BAR_LENGTH - progress_length
 
         if phase != VAL:
             print('\rEpoch: %*d/%*d [%s%s]  ' % (
                 epoch_length, epoch_num, epoch_length, total_epoch_num, '=' * progress_length, '-' * neg_progress_length), end='')
-        if (phase != VAL) or ((phase == VAL) and (epoch_num == total_epoch_num)):
+        if (phase != VAL) or ((phase == VAL) and (progress == 1)):
             if (len(keys) != 0) and (len(values) != 0):
                 for (k, v) in zip(keys, values):
-                    print('%s: %.4f  ' % (phase_str[phase] + '-' + k, v), end='')
+                    print('%s: %.4f  ' %
+                          (phase_str[phase] + '-' + k, v), end='')
         print('\033[K', end='')
         sys.stdout.flush()
 
@@ -102,28 +104,30 @@ class Model(object):
         return (1,) + shape + (1,)
 
     @staticmethod
-    def weight(shape):
-        return tf.Variable(tf.truncated_normal(shape, stddev=0.1))
+    def weight(shape, name='', **kwargs):
+        return tf.Variable(tf.truncated_normal(shape, stddev=0.1), name='weight-' + name, **kwargs)
 
     @staticmethod
-    def bias(shape):
-        # return tf.Variable(tf.constant(0.1, shape=shape))
-        return tf.Variable(tf.truncated_normal(shape, stddev=0.1))
+    def bias(shape, name='', **kwargs):
+        return tf.Variable(tf.truncated_normal(shape, stddev=0.1), name='bias-' + name, **kwargs)
 
     @staticmethod
-    def dense(x, output_dim):
+    def dense(x, output_dim, **kwargs):
         input_shape = Model.get_batch_shape(x)
         assert len(input_shape) == 1
-        return tf.matmul(x, Model.weight((input_shape[0], output_dim))) + Model.bias((output_dim,))
+        return tf.matmul(x, Model.weight((input_shape[0], output_dim), **kwargs)) + Model.bias((output_dim,), **kwargs)
 
     @staticmethod
-    def dense_relu_drop(x, d, output_dim):
-        return tf.nn.dropout(tf.nn.relu6(Model.dense(x, output_dim)), d)
+    def dense_relu_drop(x, d, output_dim, **kwargs):
+        if d == 1.0:
+            return tf.nn.relu6(Model.dense(x, output_dim, **kwargs))
+        else:
+            return tf.nn.dropout(tf.nn.relu6(Model.dense(x, output_dim, **kwargs)), d)
 
     @staticmethod
     def dense_sequential(x, d, arch):
         h = x
-        for output_dim in arch:
+        for (i, output_dim) in zip(len(arch), arch):
             h = Model.dense_relu_drop(h, d, output_dim)
         return h
 
@@ -164,12 +168,21 @@ class Model(object):
             'inputs': {},
             'outputs': {},
             'updates': {},
-            'kwargs': {'epoch': _EPOCH, 'batch_size': _BATCH_SIZE}} for _ in xrange(3)]
+            'kwargs': {'epoch': _EPOCH, 'batch_size': _BATCH_SIZE, 'report_per': _REPORT_PER}} for _ in xrange(3)]
         self.output_values = [[] for _ in xrange(3)]
 
     def init(self, excludes=[]):
         self.sess.run(tf.initialize_variables(
             [v for v in tf.all_variables() if v not in excludes]))
+
+    def set_train(self, *args, **kwargs):
+        self.set(TRAIN, *args, **kwargs)
+
+    def set_val(self, *args, **kwargs):
+        self.set(VAL, *args, **kwargs)
+
+    def set_test(self, *args, **kwargs):
+        self.set(TEST, *args, **kwargs)
 
     def set(self, phase, inputs=None, outputs=None, updates=None, **kwargs):
         if phase == VAL:
@@ -195,7 +208,8 @@ class Model(object):
         args = self.args[phase]
         (inputs, outputs, updates, kwargs) = (
             args['inputs'], args['outputs'], args['updates'], args['kwargs'])
-        (total_epoch_num, batch_size) = (kwargs['epoch'], kwargs['batch_size'])
+        (total_epoch_num, batch_size, report_per) = (
+            kwargs['epoch'], kwargs['batch_size'], kwargs['report_per'])
 
         sample_num = Dataset.get_sample_num(inputs)
         batch_size = sample_num if batch_size == -1 else batch_size
@@ -228,21 +242,23 @@ class Model(object):
                     else:
                         value_epoch[key][batch_num] = value
 
-                Model.print_report(
-                    phase,
-                    epoch_num + 1,
-                    total_epoch_num,
-                    (batch_num + 1.) / total_batch_num * 100,
-                    [value for (show, value) in zip(
-                        key_show, outputs.values()) if show],
-                    [np.sum(value) / (batch_num + 1) for (show, value)
-                     in zip(key_show, value_epoch.values()) if show])
+                if np.mod(epoch_num + 1, report_per) == 0:
+                    Model.print_report(
+                        phase,
+                        epoch_num + 1,
+                        total_epoch_num,
+                        (batch_num + 1.) / total_batch_num,
+                        [value for (show, value) in zip(
+                            key_show, outputs.values()) if show],
+                        [np.sum(value) / (batch_num + 1) for (show, value)
+                         in zip(key_show, value_epoch.values()) if show])
 
             self.output_values[phase] += [value_epoch]
-            if (phase == TRAIN) and self.val_flag:
-                self.feed(VAL)
-            if phase != VAL:
-                print('')
+            if np.mod(epoch_num + 1, report_per) == 0:
+                if (phase == TRAIN) and self.val_flag:
+                    self.feed(VAL)
+                if phase != VAL:
+                    print('')
 
     def save(self, path, step=None):
         if step is None:
