@@ -62,9 +62,11 @@ class Dataset(object):
 
     @staticmethod
     def permute(feed_dict):
-        perm = np.random.permutation(Dataset.get_sample_num(feed_dict))
-        return dict([(key, value[perm]) if isinstance(value, np.ndarray) else (key, value) for (key, value) in feed_dict.iteritems()])
-
+        state = np.random.get_state()
+        for value in feed_dict.values():
+            if isinstance(value, np.ndarray):
+                np.random.set_state(state)
+                np.random.shuffle(value)
 
 class Model(object):
 
@@ -105,11 +107,11 @@ class Model(object):
 
     @staticmethod
     def weight(shape, name='', **kwargs):
-        return tf.Variable(tf.truncated_normal(shape, stddev=0.1), name='weight-' + name, **kwargs)
+        return tf.Variable(tf.truncated_normal(shape, stddev=np.sqrt(6 / np.sum(shape))), name='weight-' + name, **kwargs)
 
     @staticmethod
     def bias(shape, name='', **kwargs):
-        return tf.Variable(tf.truncated_normal(shape, stddev=0.1), name='bias-' + name, **kwargs)
+        return tf.Variable(tf.truncated_normal(shape, stddev=np.sqrt(6 / np.sum(shape))), name='bias-' + name, **kwargs)
 
     @staticmethod
     def dense(x, output_dim, **kwargs):
@@ -224,21 +226,18 @@ class Model(object):
 
         for epoch_num in xrange(total_epoch_num):
             if phase == TRAIN:
-                inputs = Dataset.permute(inputs)
+                Dataset.permute(inputs)
 
             value_epoch = dict([
-                (key, np.zeros((sample_num,) +
-                               shape[1:]) if form else np.zeros((total_batch_num,) + shape))
+                (key, np.zeros((sample_num,) + shape[1:]) if form else np.zeros((total_batch_num,) + shape))
                 for (key, shape, form) in zip(outputs.keys(), key_shape, key_form)])
 
             for (batch, batch_num, min_batch_index, max_batch_index) in Dataset.get_batch(inputs, sample_num, batch_size, total_batch_num):
-                value_batch = self.sess.run(
-                    outputs.keys() + updates.keys(), feed_dict=batch)[:len(outputs)]
+                value_batch = self.sess.run(outputs.keys() + updates.keys(), feed_dict=batch)[:len(outputs)]
 
                 for (key, value, form) in zip(outputs.keys(), value_batch, key_form):
                     if form:
-                        value_epoch[key][
-                            min_batch_index:max_batch_index] = value
+                        value_epoch[key][min_batch_index:max_batch_index] = value
                     else:
                         value_epoch[key][batch_num] = value
 
@@ -248,10 +247,8 @@ class Model(object):
                         epoch_num + 1,
                         total_epoch_num,
                         (batch_num + 1.) / total_batch_num,
-                        [value for (show, value) in zip(
-                            key_show, outputs.values()) if show],
-                        [np.sum(value) / (batch_num + 1) for (show, value)
-                         in zip(key_show, value_epoch.values()) if show])
+                        [value for (show, value) in zip(key_show, outputs.values()) if show],
+                        [np.sum(value_epoch[key]) / (batch_num + 1) for (show, key) in zip(key_show, outputs.keys()) if show])
 
             self.output_values[phase] += [value_epoch]
             if np.mod(epoch_num + 1, report_per) == 0:
