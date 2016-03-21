@@ -48,6 +48,13 @@ acc = tf.reduce_mean(tf.to_float(correct))
 
 model = db.Model()
 model.init()
-model.set_train({x: X[L], y: Y[L]}, {loss: 'loss', acc: 'acc'}, {train: None}, **_KWARGS)
-model.set_val({x: X[U], y: Y[U]}, {loss: 'loss', acc: 'acc'})
+model.train(
+    dry_run=True,
+    inputs={x: X[L], y: Y[L]},
+    outputs={loss: 'loss', acc: 'acc'},
+    updates={train: None}, **_KWARGS)
+model.val(
+    dry_run=True,
+    inputs={x: X[U], y: Y[U]},
+    outputs={loss: 'loss', acc: 'acc'})
 model.train()
