@@ -43,10 +43,10 @@ def exponential_moving_average(value, decay=0.99, num_updates=None, init=None):
     value = tf.to_float(value)
     shape = value.get_shape()
 
-    if num_updates is not None:
-        decay = tf.minimum(decay, (1 + num_updates) / (10 + num_updates))
     if init is None:
         init = tf.zeros(shape)
+        if num_updates is not None:
+            decay = tf.minimum(decay, (1 + num_updates) / (10 + num_updates))
 
     value_averaged = tf.Variable(init, trainable=False)
     value_averaged_ = decay * value_averaged + (1 - decay) * value
