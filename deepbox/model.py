@@ -22,7 +22,7 @@ class Model(object):
             fetch = callback.get('fetch', {})
             func = callback.get('func', None)
 
-            if run and ((interval > 0 and (step + 1) % interval == 0) or (interval == -1 and step + 1 == end_step)) and callable(func):
+            if run and ((interval > 0 and (step + 1) % interval == 0) or (interval == -1 and step + 1 == end_step)):
                 yield (fetch, func)
 
     def train(self, iteration, feed_dict={}, callbacks=[]):
@@ -52,7 +52,8 @@ class Model(object):
 
             for (fetch, func) in self.get_callback(callbacks, step, end_step):
                 fetch_val = {key: output_value_dict[key] for key in fetch}
-                func(fetch=fetch_val, step=step, end_step=end_step)
+                if callable(func):
+                    func(fetch=fetch_val, step=step, end_step=end_step)
 
     def display(self, fetch, step, end_step, begin='', end='', on_end=False):
         step_length = np.floor(np.log10(end_step) + 1).astype(np.int32)
@@ -71,6 +72,6 @@ class Model(object):
         for (key, value) in fetch.iteritems():
             summary_writer.add_summary(value, global_step=self.get_value(self.global_step))
 
-    def save(self, fetch, step, end_step, saver, saver_kwargs):
+    def save(self, fetch, step, end_step, saver, **saver_kwargs):
         saver.save(self.sess, global_step=self.get_value(self.global_step), **saver_kwargs)
         print('[ Model saved ]')
