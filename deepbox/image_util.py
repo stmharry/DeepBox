@@ -15,20 +15,12 @@ def get_channel(value):
     return get_shape(value)[3]
 
 
+def random(lower, upper):
+    return lower + tf.random_uniform(()) * tf.to_float(upper - lower)
+
+
 def random_int(lower, upper):
-    return tf.to_int32(lower + tf.random_uniform(()) * tf.to_float(upper - lower))
-
-
-def convert_to_rgb(value):
-    shape = tf.shape(value)
-    channel = shape[2]
-
-    value = tf.cond(
-        tf.equal(channel, 1),
-        lambda: tf.image.grayscale_to_rgb(value),
-        lambda: value)
-
-    return value
+    return tf.to_int32(random(lower, upper))
 
 
 def random_resize(value, size_range):
@@ -66,13 +58,32 @@ def random_crop(value, size):
     return value
 
 
-def random_flip(value):
-    value = tf.image.random_flip_left_right(value)
-    value = tf.image.random_flip_up_down(value)
+def random_flip(value, horizontal=True, vertical=False):
+    if horizontal:
+        value = tf.image.random_flip_left_right(value)
+    if vertical:
+        value = tf.image.random_flip_up_down(value)
     return value
 
 
-def random_adjust(value, max_delta, contrast_lower, contrast_upper):
+def random_adjust_rgb(value, max_delta=63, contrast_range=(0.5, 1.5)):
     value = tf.image.random_brightness(value, max_delta=max_delta)
-    value = tf.image.random_contrast(value, lower=contrast_lower, upper=contrast_upper)
+    value = tf.image.random_contrast(value, lower=contrast_range[0], upper=contrast_range[1])
+    return value
+
+
+def random_adjust_hsv(value, h_offset_range=(-0.1, 0.1), sv_power_range=(0.25, 4), sv_scale_range=(0.7, 1.4), sv_offset_range=(-0.1, 0.1)):
+    (h, s, v) = tf.split(split_dim=2, num_split=3, value=value)
+
+    def power_scale_offset(v, power_range, scale_range, offset_range):
+        v = tf.pow(v, random(power_range[0], power_range[1]))
+        v = v * random(scale_range[0], scale_range[1])
+        v = v + random(offset_range[0], offset_range[1])
+        return v
+
+    h = h + random(h_offset_range[0], h_offset_range[1])
+    s = power_scale_offset(s, sv_power_range, sv_scale_range, sv_offset_range)
+    v = power_scale_offset(v, sv_power_range, sv_scale_range, sv_offset_range)
+
+    value = tf.concat(concat_dim=2, values=[h, s, v])
     return value

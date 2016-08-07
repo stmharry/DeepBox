@@ -2,48 +2,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-EPSILON = 1e-9
-
-
-class NetworkNormalization(object):
-    def __init__(self, axes=(0, 1, 2, 3), tolerance=0.1, max_iteration=10):
-        self.axes = axes
-        self.tolerance = tolerance
-        self.max_iteration = max_iteration
-        self.collection = list()
-
-    def register(self, source, targets):
-        (_, variance) = tf.nn.moments(source, axes=self.axes)
-        condition = tf.greater(tf.abs(variance - 1), self.tolerance)
-
-        target_assigns = [
-            target.assign(tf.cond(
-                condition,
-                lambda: target / tf.sqrt(variance),
-                lambda: target)) for target in targets]
-
-        self.collection.append(dict(
-            source=source,
-            targets=targets,
-            variance=variance,
-            condition=condition,
-            target_assigns=target_assigns))
-
-    def run(self, sess=None, feed_dict=None):
-        if sess is None:
-            sess = tf.get_default_session()
-
-        print('[ Network Normalization ]')
-        for item in self.collection:
-            print('%s -> ' % item['source'].name, end='')
-            for target in item['targets']:
-                print('%s ' % target.name, end='')
-            print('')
-            for iteration in xrange(self.max_iteration):
-                (variance, condition) = sess.run([item['variance'], item['condition']] + item['target_assigns'], feed_dict=feed_dict)[:2]
-                print('Iteration %d, variance: %.4f' % (iteration, variance))
-                if not condition:
-                    break
+EPSILON = 1e-5
 
 
 def increment_variable(init=0):
@@ -95,3 +54,44 @@ def exponential_moving_average(value, decay=0.99, num_updates=None, init=None):
     value_averaged_ = decay * value_averaged + (1 - decay) * value
     with tf.control_dependencies([value_averaged.assign(value_averaged_)]):
         return tf.identity(value_averaged_)
+
+
+class NetworkNormalization(object):
+    def __init__(self, axes, tolerance=0.1, max_iteration=10):
+        self.axes = axes
+        self.tolerance = tolerance
+        self.max_iteration = max_iteration
+        self.collection = list()
+
+    def register(self, source, targets):
+        (_, variance) = tf.nn.moments(source, axes=self.axes)
+        condition = tf.greater(tf.abs(variance - 1), self.tolerance)
+
+        target_assigns = [
+            target.assign(tf.cond(
+                condition,
+                lambda: target / tf.sqrt(variance),
+                lambda: target)) for target in targets]
+
+        self.collection.append(dict(
+            source=source,
+            targets=targets,
+            variance=variance,
+            condition=condition,
+            target_assigns=target_assigns))
+
+    def run(self, sess=None, feed_dict=None):
+        if sess is None:
+            sess = tf.get_default_session()
+
+        print('[ Network Normalization ]')
+        for item in self.collection:
+            print('%s -> ' % item['source'].name, end='')
+            for target in item['targets']:
+                print('%s ' % target.name, end='')
+            print('')
+            for iteration in xrange(self.max_iteration):
+                (variance, condition) = sess.run([item['variance'], item['condition']] + item['target_assigns'], feed_dict=feed_dict)[:2]
+                print('Iteration %d, variance: %.4f' % (iteration, variance))
+                if not condition:
+                    break
