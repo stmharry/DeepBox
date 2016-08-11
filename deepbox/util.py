@@ -5,6 +5,13 @@ import tensorflow as tf
 EPSILON = 1e-5
 
 
+def merge_dicts(*args):
+    res = dict()
+    for arg in args:
+        res.update(arg)
+    return res
+
+
 def increment_variable(init=0):
     num = tf.Variable(init, dtype=tf.float32, trainable=False)
     num_ = num + 1

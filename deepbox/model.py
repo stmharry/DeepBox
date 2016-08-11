@@ -1,21 +1,23 @@
 from __future__ import print_function
 
-import tensorflow as tf
+import enum
 import numpy as np
 import sys
+import tensorflow as tf
 import time
-
-FEED_PHASE = 0
-FETCH = FEED_PHASE + 1
-FUNC = FEED_PHASE + 2
 
 
 class Model(object):
+    class Phase(enum.Enum):
+        FETCH = 0
+        FUNC = 1
+
     def __init__(self, global_step, sess=None):
         self.global_step = tf.to_int32(global_step)
         if sess is None:
             sess = tf.get_default_session()
         self.sess = sess
+        self.output_values = dict()
 
     def get_value(self, value, feed_dict=None):
         return self.sess.run(value, feed_dict=feed_dict)
@@ -25,15 +27,15 @@ class Model(object):
             run = callback.get('run', True)
             interval = callback.get('interval', 1)
             always = callback.get('always', False)
-            fetch = callback.get('fetch', {})
+            fetch = callback.get('fetch', dict())
             func = callback.get('func', None)
 
             if run:
                 on = (interval > 0 and (step + 1) % interval == 0) or (interval == -1 and step + 1 == end_step)
-                if phase == FETCH:
+                if phase == Model.Phase.FETCH:
                     if on or always:
                         yield (fetch, func)
-                elif phase == FUNC:
+                elif phase == Model.Phase.FUNC:
                     if on and callable(func):
                         yield (fetch, func)
 
@@ -55,18 +57,18 @@ class Model(object):
         end_step = current_step + iteration
 
         for step in xrange(current_step, end_step):
-            output_dict = {}
-            for (fetch, func) in self.get_callback(FETCH, callbacks, step, end_step):
-                output_dict.update(fetch)
+            outputs = {}
+            for (fetch, func) in self.get_callback(Model.Phase.FETCH, callbacks, step, end_step):
+                outputs.update(fetch)
 
             start_time = time.time()
-            values = self.sess.run(output_dict.values(), feed_dict=feed_dict)
+            values = self.sess.run(outputs.values(), feed_dict=feed_dict)
             duration = time.time() - start_time
 
-            output_value_dict = dict(zip(output_dict.keys(), values))
-            for (fetch, func) in self.get_callback(FUNC, callbacks, step, end_step):
+            self.output_values = dict(zip(outputs.keys(), values))
+            for (fetch, func) in self.get_callback(Model.Phase.FUNC, callbacks, step, end_step):
                 func(
-                    fetch={key: output_value_dict[key] for key in fetch},
+                    fetch={key: self.output_values[key] for key in fetch},
                     duration=duration,
                     step=step,
                     end_step=end_step)
