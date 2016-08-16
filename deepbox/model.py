@@ -39,14 +39,14 @@ class Model(object):
                     if on and callable(func):
                         yield (fetch, func)
 
-    def train(self, iteration, feed_dict={}, callbacks=[]):
+    def train(self, iteration, feed_dict=dict(), callbacks=list()):
         self.feed(
             current_step=self.get_value(self.global_step),
             iteration=iteration,
             feed_dict=feed_dict,
             callbacks=callbacks)
 
-    def test(self, iteration, feed_dict={}, callbacks=[]):
+    def test(self, iteration, feed_dict=dict(), callbacks=list()):
         self.feed(
             current_step=0,
             iteration=iteration,
@@ -57,7 +57,7 @@ class Model(object):
         end_step = current_step + iteration
 
         for step in xrange(current_step, end_step):
-            outputs = {}
+            outputs = dict()
             for (fetch, func) in self.get_callback(Model.Phase.FETCH, callbacks, step, end_step):
                 outputs.update(fetch)
 
@@ -97,6 +97,6 @@ class Model(object):
         for (key, value) in fetch.iteritems():
             summary_writer.add_summary(value, global_step=self.get_value(self.global_step))
 
-    def save(self, saver, saver_kwargs={}, **kwargs):
+    def save(self, saver, saver_kwargs=dict(), **kwargs):
         saver.save(self.sess, global_step=self.get_value(self.global_step), **saver_kwargs)
         print('[ Model saved ]')
