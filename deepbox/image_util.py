@@ -23,13 +23,16 @@ def random_int(lower, upper):
     return tf.to_int32(random(lower, upper))
 
 
-def random_resize(value, size_range):
+def random_resize(value, size_range, keep_aspect_ratio=True):
     new_shorter_size = random_int(size_range[0], size_range[1] + 1)
 
     shape = tf.shape(value)
     height = shape[0]
     width = shape[1]
     height_smaller_than_width = tf.less(height, width)
+
+    if ratio_range is None:
+
 
     new_height_and_width = tf.cond(
         height_smaller_than_width,
